@@ -1,8 +1,7 @@
 (ns taoensso.carmine.protocol
   "Facilities for actually communicating with Redis server using its
   request/response protocol. Originally adapted from Accession.
-
-  Ref: http://redis.io/topics/protocol"
+  Ref. http://redis.io/topics/protocol"
   {:author "Peter Taoussanis"}
   (:require [clojure.string       :as str]
             [taoensso.encore      :as encore]
@@ -32,7 +31,7 @@
 (def no-context-ex
   (ex-info
     (str "Redis commands must be called within the context of a"
-      " connection to Redis server. See `wcar`.") {}))
+         " connection to Redis server. See `wcar`.") {}))
 
 ;;;;
 
@@ -50,7 +49,6 @@
 ;; the data requires special reply handling
 (def ^{:tag 'bytes} bs-bin (bytestring "\u0000<")) ; Binary data marker
 (def ^{:tag 'bytes} bs-clj (bytestring "\u0000>")) ; Frozen data marker
-(def ^{:tag 'bytes} bs-bin (bytestring "\u0000<"))
 
 (defn- ensure-reserved-first-byte [^bytes ba]
   (when (= (first ba) 0)
