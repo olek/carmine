@@ -317,7 +317,8 @@
         (return return-val)
         (if (or (nil? nmax-attempts) (< nattempt (long nmax-attempts)))
           (recur (inc nattempt))
-          (return abort-val))))))
+          (return abort-val)))))
+  nil)
 
 (defn swap "Experimental."
   ([k       f] (swap k       f nil nil))
@@ -341,7 +342,6 @@
   (wcar {} (get "swap-k"))
   (encore/qb 100
     (wcar {} (kswap "swap-k" (fn [?old _] (inc (or (encore/as-?int ?old) 0))))))
-
   (wcar {} (parse str/upper-case
              (swap "swap-k2" (fn [_ _] (encore/swapped 1 "foo"))))))
 
