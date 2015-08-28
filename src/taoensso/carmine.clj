@@ -289,6 +289,30 @@
   (wcar {} (compare-and-set "cas-k" [:foo] [:bar]))
   (wcar {} (get "cas-k")))
 
+;; TODO `hswap` [k field f]
+(defn kswap "Experimental. Like `swap!` for Redis keys."
+  ([k f] (kswap k f 0 nil))
+  ([k f ^long nmax-attempts abort-val]
+   (loop [nattempt 1]
+     (let [ ;; Functions as (get _ sentinel):
+           [ex ?old-val] (with-replies (exists k) (get k))
+           nx?           (= ex 0)
+           old-val       (if nx? :redis/nx ?old-val)
+           [new-val return-val] (encore/swapped* (f ?old-val nx?))
+           cas-success?         (with-replies
+                                  (compare-and-set k old-val new-val))]
+       ;; (println [nattempt old-val new-val return-val cas-success?])
+       (if cas-success?
+         (return return-val)
+         (if (or (zero? nmax-attempts) (< nattempt nmax-attempts))
+           (recur (inc nattempt))
+           (return abort-val)))))))
+
+(comment
+  (wcar {} (get "swap-k"))
+  (encore/qb 100
+    (wcar {} (kswap "swap-k" (fn [?old _] (inc (or (encore/as-?int ?old) 0)))))))
+
 ;;;
 
 (defn hmset* "Like `hmset` but takes a map argument."
