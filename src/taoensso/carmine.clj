@@ -261,32 +261,47 @@
             (wcar {} (ping) (lua-local "return redis.call('ping')" {:_ "_"} {})
                      (ping) (ping) (ping)))))
 
-(defn- prep-cas-old-val [x]
+(defn- prep-old-val-cas [x]
   (let [^bytes bs (protocol/coerce-bs x)
         just-use-val? (< (alength bs) 40)
         ?sha (when-not just-use-val?
                (org.apache.commons.codec.digest.DigestUtils/sha1Hex bs))]
     [?sha (raw bs)]))
 
-(comment (prep-cas-old-val "hello there"))
+(comment (encore/qb 1000 (prep-old-val-cas "hello there")))
 
-;; TODO Add a `compare-and-hset` [k field old-val new-val] variant
 (def compare-and-set
   "Experimental. Workaround for absence from Redis core, Ref http://goo.gl/M4Phx8."
   (let [script (encore/slurp-resource "lua/compare-and-set.lua")]
     (fn [k old-val new-val]
       (if (= old-val :redis/nx)
         (setnx k new-val)
-        (let [[?sha raw-bs] (prep-cas-old-val old-val)]
+        (let [[?sha raw-bs] (prep-old-val-cas old-val)]
           (lua script {:k k}
             {:old-val-?sha (if-not ?sha ""     ?sha)
+             :old-?val     (if-not ?sha raw-bs "")
+             :new-val      new-val}))))))
+
+(def compare-and-hset "Experimental."
+  (let [script (encore/slurp-resource "lua/compare-and-hset.lua")]
+    (fn [k field old-val new-val]
+      (if (= old-val :redis/nx)
+        (hsetnx k field new-val)
+        (let [[?sha raw-bs] (prep-old-val-cas old-val)]
+          (lua script {:k k}
+            {:field        field
+             :old-val-?sha (if-not ?sha ""     ?sha)
              :old-?val     (if-not ?sha raw-bs "")
              :new-val      new-val}))))))
 
 (comment
   (wcar {} (del "cas-k") (compare-and-set "cas-k" :redis/nx [:foo]))
   (wcar {} (compare-and-set "cas-k" [:foo] [:bar]))
-  (wcar {} (get "cas-k")))
+  (wcar {} (get "cas-k"))
+
+  (wcar {} (del "cas-k") (compare-and-hset "cas-k" "field" :redis/nx [:foo]))
+  (wcar {} (compare-and-hset "cas-k" "field" [:foo] [:bar]))
+  (wcar {} (hget "cas-k" "field")))
 
 ;; TODO `hswap` [k field f]
 (defn kswap "Experimental. Like `swap!` for Redis keys."
