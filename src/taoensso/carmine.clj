@@ -272,37 +272,35 @@
 
 (def compare-and-set
   "Experimental. Workaround for absence from Redis core, Ref http://goo.gl/M4Phx8."
-  (let [set-script  (encore/slurp-resource "lua/compare-and-set.lua")
-        hset-script (encore/slurp-resource "lua/compare-and-hset.lua")]
-    (fn
-      ([k old-val new-val] ; compare-and-set
-       (if (= old-val :redis/nx)
-         (setnx k new-val)
-         (let [[?sha raw-bs] (prep-old-val-cas old-val)]
-           (lua set-script
-             {:k            k}
-             {:old-val-?sha (if-not ?sha ""     ?sha)
-              :old-?val     (if-not ?sha raw-bs "")
-              :new-val      new-val}))))
+  (let [script (encore/slurp-resource "lua/compare-and-set.lua")]
+    (fn [k old-val new-val]
+      (if (= old-val :redis/nx)
+        (setnx k new-val)
+        (let [[?sha raw-bs] (prep-old-val-cas old-val)]
+          (lua script {:k k}
+            {:old-val-?sha (if-not ?sha ""     ?sha)
+             :old-?val     (if-not ?sha raw-bs "")
+             :new-val      new-val}))))))
 
-      ([k field old-val new-val] ; compare-and-hset
-       (if (= old-val :redis/nx)
-         (hsetnx k field new-val)
-         (let [[?sha raw-bs] (prep-old-val-cas old-val)]
-           (lua hset-script
-             {:k            k}
-             {:field        field
-              :old-val-?sha (if-not ?sha ""     ?sha)
-              :old-?val     (if-not ?sha raw-bs "")
-              :new-val      new-val})))))))
+(def compare-and-hset "Experimental."
+  (let [script (encore/slurp-resource "lua/compare-and-hset.lua")]
+    (fn [k field old-val new-val]
+      (if (= old-val :redis/nx)
+        (hsetnx k field new-val)
+        (let [[?sha raw-bs] (prep-old-val-cas old-val)]
+          (lua script {:k k}
+            {:field        field
+             :old-val-?sha (if-not ?sha ""     ?sha)
+             :old-?val     (if-not ?sha raw-bs "")
+             :new-val      new-val}))))))
 
 (comment
   (wcar {} (del "cas-k") (compare-and-set "cas-k" :redis/nx [:foo]))
   (wcar {} (compare-and-set "cas-k" [:foo] [:bar]))
   (wcar {} (get "cas-k"))
 
-  (wcar {} (del "cas-k") (compare-and-set "cas-k" "field" :redis/nx [:foo]))
-  (wcar {} (compare-and-set "cas-k" "field" [:foo] [:bar]))
+  (wcar {} (del "cas-k") (compare-and-hset "cas-k" "field" :redis/nx [:foo]))
+  (wcar {} (compare-and-hset "cas-k" "field" [:foo] [:bar]))
   (wcar {} (hget "cas-k" "field")))
 
 (defn- swap* [get-fn cas-fn k f nmax-attempts abort-val]
@@ -321,18 +319,19 @@
             (recur (inc nattempt))
             (return abort-val)))))))
 
-(defn swap "Experimental. Like `swap!` for Redis keys / hash fields."
-  ([k       f] (swap k       f 0 nil))
-  ([k field f] (swap k field f 0 nil))
-  ([k f nmax-attempts abort-val] ; kswap
+(defn kswap "Experimental. Like `swap!` for Redis keys."
+  ([k f] (kswap k f 0 nil))
+  ([k f nmax-attempts abort-val]
    (swap*
-     (fn get-fn [k] (get k))
+     (fn get-fn [k]               (get k))
      (fn cas-fn [old-val new-val] (compare-and-set k old-val new-val))
-     k f nmax-attempts abort-val))
+     k f nmax-attempts abort-val)))
 
-  ([k field f nmax-attempts abort-val] ; hswap
+(defn hswap "Experimental. Like `swap!` for Redis hash fields."
+  ([k field f] (hswap k field f 0 nil))
+  ([k field f nmax-attempts abort-val]
    (swap*
-     (fn get-fn [k] (hget k field))
+     (fn get-fn [k]               (hget k field))
      (fn cas-fn [old-val new-val] (compare-and-hset k field old-val new-val))
      k f nmax-attempts abort-val)))
 
