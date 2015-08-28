@@ -261,6 +261,7 @@
             (wcar {} (ping) (lua-local "return redis.call('ping')" {:_ "_"} {})
                      (ping) (ping) (ping)))))
 
+;; TODO Add a `compare-and-hset` [k field old-val new-val] variant
 (def compare-and-set
   "Experimental. Workaround for this not being in Redis core,
   Ref http://goo.gl/M4Phx8."
