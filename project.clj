@@ -12,8 +12,8 @@
 
   :dependencies
   [[org.clojure/clojure              "1.5.1"]
-   [com.taoensso/encore              "2.4.2"]
-   [com.taoensso/timbre              "4.1.0"]
+   [com.taoensso/encore              "2.5.0"]
+   [com.taoensso/timbre              "4.1.1"]
    [com.taoensso/nippy               "2.9.0"]
    [org.apache.commons/commons-pool2 "2.4.2"]
    [commons-codec/commons-codec      "1.10"]
