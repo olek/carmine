@@ -311,7 +311,7 @@
     (let [[?old-val nx?] (get-fn) ; Acts as (get _ sentinel)
           old-val        (if nx? :redis/nx ?old-val)
           [new-val return-val] (encore/swapped* (f ?old-val nx?))
-          cas-success?         (with-replies (cas-fn old-val new-val))]
+          cas-success?         (parse nil (with-replies (cas-fn old-val new-val)))]
       ;; (println [nattempt old-val new-val return-val cas-success?])
       (if cas-success?
         (return return-val)
@@ -325,14 +325,14 @@
 
   ([k f nmax-attempts abort-val]
    (swap*
-     (fn get-fn [] (let [[?ov ex] (with-replies (get k) (exists k))]
+     (fn get-fn [] (let [[?ov ex] (parse nil (with-replies (get k) (exists k)))]
                     [?ov (= ex 0)]))
      (fn cas-fn [old-val new-val] (compare-and-set k old-val new-val))
      f nmax-attempts abort-val))
 
   ([k field f nmax-attempts abort-val]
    (swap*
-     (fn get-fn [] (let [[?ov ex] (with-replies (hget k field) (hexists k field))]
+     (fn get-fn [] (let [[?ov ex] (parse nil (with-replies (hget k field) (hexists k field)))]
                     [?ov (= ex 0)]))
      (fn cas-fn [old-val new-val] (compare-and-set k field old-val new-val))
      f nmax-attempts abort-val)))
@@ -340,7 +340,10 @@
 (comment
   (wcar {} (get "swap-k"))
   (encore/qb 100
-    (wcar {} (kswap "swap-k" (fn [?old _] (inc (or (encore/as-?int ?old) 0)))))))
+    (wcar {} (kswap "swap-k" (fn [?old _] (inc (or (encore/as-?int ?old) 0))))))
+
+  (wcar {} (parse str/upper-case
+             (swap "swap-k2" (fn [_ _] (encore/swapped 1 "foo"))))))
 
 ;;;
 
