@@ -303,24 +303,37 @@
   (wcar {} (compare-and-hset "cas-k" "field" [:foo] [:bar]))
   (wcar {} (hget "cas-k" "field")))
 
-;; TODO `hswap` [k field f]
+(defn- swap* [get-fn cas-fn k f nmax-attempts abort-val]
+  (let [^long nmax-attempts nmax-attempts]
+    (loop [nattempt 1]
+      (let [ ;; Functions as (get _ sentinel):
+            [ex ?old-val] (with-replies (exists k) (get-fn k))
+            nx?           (= ex 0)
+            old-val       (if nx? :redis/nx ?old-val)
+            [new-val return-val] (encore/swapped* (f ?old-val nx?))
+            cas-success?         (with-replies (cas-fn old-val new-val))]
+        ;; (println [nattempt old-val new-val return-val cas-success?])
+        (if cas-success?
+          (return return-val)
+          (if (or (zero? nmax-attempts) (< nattempt nmax-attempts))
+            (recur (inc nattempt))
+            (return abort-val)))))))
+
 (defn kswap "Experimental. Like `swap!` for Redis keys."
   ([k f] (kswap k f 0 nil))
-  ([k f ^long nmax-attempts abort-val]
-   (loop [nattempt 1]
-     (let [ ;; Functions as (get _ sentinel):
-           [ex ?old-val] (with-replies (exists k) (get k))
-           nx?           (= ex 0)
-           old-val       (if nx? :redis/nx ?old-val)
-           [new-val return-val] (encore/swapped* (f ?old-val nx?))
-           cas-success?         (with-replies
-                                  (compare-and-set k old-val new-val))]
-       ;; (println [nattempt old-val new-val return-val cas-success?])
-       (if cas-success?
-         (return return-val)
-         (if (or (zero? nmax-attempts) (< nattempt nmax-attempts))
-           (recur (inc nattempt))
-           (return abort-val)))))))
+  ([k f nmax-attempts abort-val]
+   (swap*
+     (fn get-fn [k]               (get k))
+     (fn cas-fn [old-val new-val] (compare-and-set k old-val new-val))
+     k f nmax-attempts abort-val)))
+
+(defn hswap "Experimental. Like `swap!` for Redis hash fields."
+  ([k field f] (hswap k field f 0 nil))
+  ([k field f nmax-attempts abort-val]
+   (swap*
+     (fn get-fn [k]               (hget k field))
+     (fn cas-fn [old-val new-val] (compare-and-hset k field old-val new-val))
+     k f nmax-attempts abort-val)))
 
 (comment
   (wcar {} (get "swap-k"))
