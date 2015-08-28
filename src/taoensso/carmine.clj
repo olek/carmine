@@ -271,70 +271,70 @@
 (comment (encore/qb 1000 (prep-old-val-cas "hello there")))
 
 (def compare-and-set
-  "Experimental. Workaround for absence from Redis core, Ref http://goo.gl/M4Phx8."
-  (let [script (encore/slurp-resource "lua/compare-and-set.lua")]
-    (fn [k old-val new-val]
-      (if (= old-val :redis/nx)
-        (setnx k new-val)
-        (let [[?sha raw-bs] (prep-old-val-cas old-val)]
-          (lua script {:k k}
-            {:old-val-?sha (if-not ?sha ""     ?sha)
-             :old-?val     (if-not ?sha raw-bs "")
-             :new-val      new-val}))))))
+  "Experimental. Workaround for absence from Redis core,
+  Ref http://goo.gl/M4Phx8."
+  (let [k-script (encore/slurp-resource "lua/compare-and-set.lua")
+        h-script (encore/slurp-resource "lua/compare-and-hset.lua")]
+    (fn
+      ([k old-val new-val] ; cas against key
+       (if (= old-val :redis/nx)
+         (setnx k new-val)
+         (let [[?sha raw-bs] (prep-old-val-cas old-val)]
+           (lua k-script {:k k}
+             {:old-val-?sha (if-not ?sha ""     ?sha)
+              :old-?val     (if-not ?sha raw-bs "")
+              :new-val      new-val}))))
 
-(def compare-and-hset "Experimental."
-  (let [script (encore/slurp-resource "lua/compare-and-hset.lua")]
-    (fn [k field old-val new-val]
-      (if (= old-val :redis/nx)
-        (hsetnx k field new-val)
-        (let [[?sha raw-bs] (prep-old-val-cas old-val)]
-          (lua script {:k k}
-            {:field        field
-             :old-val-?sha (if-not ?sha ""     ?sha)
-             :old-?val     (if-not ?sha raw-bs "")
-             :new-val      new-val}))))))
+      ([k field old-val new-val] ; cas against hash field
+       (if (= old-val :redis/nx)
+         (hsetnx k field new-val)
+         (let [[?sha raw-bs] (prep-old-val-cas old-val)]
+           (lua h-script {:k k}
+             {:field        field
+              :old-val-?sha (if-not ?sha ""     ?sha)
+              :old-?val     (if-not ?sha raw-bs "")
+              :new-val      new-val})))))))
 
 (comment
   (wcar {} (del "cas-k") (compare-and-set "cas-k" :redis/nx [:foo]))
   (wcar {} (compare-and-set "cas-k" [:foo] [:bar]))
   (wcar {} (get "cas-k"))
 
-  (wcar {} (del "cas-k") (compare-and-hset "cas-k" "field" :redis/nx [:foo]))
-  (wcar {} (compare-and-hset "cas-k" "field" [:foo] [:bar]))
+  (wcar {} (del "cas-k") (compare-and-set "cas-k" "field" :redis/nx [:foo]))
+  (wcar {} (compare-and-set "cas-k" "field" [:foo] [:bar]))
   (wcar {} (hget "cas-k" "field")))
 
 (defn- swap*
   "Abstracts away CAS from the particular data structure used for storage."
   [get-fn cas-fn f nmax-attempts abort-val]
-  (let [^long nmax-attempts nmax-attempts]
-    (loop [nattempt 1]
-      (let [[?old-val nx?] (get-fn) ; Acts as (get _ sentinel)
-            old-val        (if nx? :redis/nx ?old-val)
-            [new-val return-val] (encore/swapped* (f ?old-val nx?))
-            cas-success?         (with-replies (cas-fn old-val new-val))]
-        ;; (println [nattempt old-val new-val return-val cas-success?])
-        (if cas-success?
-          (return return-val)
-          (if (or (zero? nmax-attempts) (< nattempt nmax-attempts))
-            (recur (inc nattempt))
-            (return abort-val)))))))
+  (loop [nattempt 1]
+    (let [[?old-val nx?] (get-fn) ; Acts as (get _ sentinel)
+          old-val        (if nx? :redis/nx ?old-val)
+          [new-val return-val] (encore/swapped* (f ?old-val nx?))
+          cas-success?         (with-replies (cas-fn old-val new-val))]
+      ;; (println [nattempt old-val new-val return-val cas-success?])
+      (if cas-success?
+        (return return-val)
+        (if (or (nil? nmax-attempts) (< nattempt (long nmax-attempts)))
+          (recur (inc nattempt))
+          (return abort-val))))))
 
-(defn kswap "Experimental. Like `swap!` for Redis keys."
-  ([k f                        ] (kswap k f 0 nil))
+(defn swap "Experimental."
+  ([k       f] (swap k       f nil nil))
+  ([k field f] (swap k field f nil nil))
+
   ([k f nmax-attempts abort-val]
    (swap*
      (fn get-fn [] (let [[?ov ex] (with-replies (get k) (exists k))]
                     [?ov (= ex 0)]))
      (fn cas-fn [old-val new-val] (compare-and-set k old-val new-val))
-     f nmax-attempts abort-val)))
+     f nmax-attempts abort-val))
 
-(defn hswap "Experimental. Like `swap!` for Redis hash fields."
-  ([k field f                        ] (hswap k field f 0 nil))
   ([k field f nmax-attempts abort-val]
    (swap*
-     (fn get--fn [] (let [[?ov ex] (with-replies (hget k field) (hexists k field))]
-                     [?ov (= ex 0)]))
-     (fn cas-fn [old-val new-val] (compare-and-hset k field old-val new-val))
+     (fn get-fn [] (let [[?ov ex] (with-replies (hget k field) (hexists k field))]
+                    [?ov (= ex 0)]))
+     (fn cas-fn [old-val new-val] (compare-and-set k field old-val new-val))
      f nmax-attempts abort-val)))
 
 (comment
