@@ -261,27 +261,26 @@
             (wcar {} (ping) (lua-local "return redis.call('ping')" {:_ "_"} {})
                      (ping) (ping) (ping)))))
 
+(defn- prep-cas-old-val [x]
+  (let [^bytes bs (protocol/coerce-bs x)
+        just-use-val? (< (alength bs) 40)
+        ?sha (when-not just-use-val?
+               (org.apache.commons.codec.digest.DigestUtils/sha1Hex bs))]
+    [?sha (raw bs)]))
+
+(comment (prep-cas-old-val "hello there"))
+
 ;; TODO Add a `compare-and-hset` [k field old-val new-val] variant
 (def compare-and-set
-  "Experimental. Workaround for this not being in Redis core,
-  Ref http://goo.gl/M4Phx8."
-  (let [script (encore/slurp-resource "lua/cas.lua")]
+  "Experimental. Workaround for absence from Redis core, Ref http://goo.gl/M4Phx8."
+  (let [script (encore/slurp-resource "lua/compare-and-set.lua")]
     (fn [k old-val new-val]
       (if (= old-val :redis/nx)
-        ;; Could also do with
-        ;; sha = redis.sha1hex(nil) = "da39a3ee5e6b4b0d3255bfef95601890afd80709"
-        ;;    != redis.sha1hex(<serialized-nil>):
         (setnx k new-val)
-        (let [bs-old-val    (protocol/coerce-bs old-val)
-              just-use-val? (< (count bs-old-val) 40) #_false #_true
-              ?sha
-              (when-not just-use-val?
-                (org.apache.commons.codec.digest.DigestUtils/sha1Hex
-                  ^bytes bs-old-val))]
-          (lua script
-            {:k            k}
-            {:old-val-?sha (if-not ?sha ""   ?sha)
-             :old-?val     (if-not ?sha old-val "")
+        (let [[?sha raw-bs] (prep-cas-old-val old-val)]
+          (lua script {:k k}
+            {:old-val-?sha (if-not ?sha ""     ?sha)
+             :old-?val     (if-not ?sha raw-bs "")
              :new-val      new-val}))))))
 
 (comment
